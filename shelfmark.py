@@ -3,7 +3,6 @@
 """
 ShelfMark
 Migrate Goodreads finished status to Audiobookshelf
-(Current stage: interactive, read-only)
 """
 
 import csv
@@ -12,6 +11,7 @@ import sys
 import requests
 import re
 import difflib
+import argparse
 
 
 # -----------------------------
@@ -26,6 +26,7 @@ def fatal(message):
     print(f"ERROR: {message}")
     sys.exit(1)
 
+
 # -----------------------------
 # Normalization helpers
 # -----------------------------
@@ -36,13 +37,17 @@ def normalize_isbn(value):
     digits = "".join(c for c in value if c.isdigit())
     return digits if digits else None
 
+
 def normalize_text(value):
     if not value:
         return None
 
     value = value.lower().strip()
 
-    # Remove trailing series info in parentheses or brackets
+    # Remove subtitles
+    value = value.split(":")[0]
+
+    # Remove trailing series info
     value = re.sub(r"\s*[\(\[].*?[\)\]]\s*$", "", value)
 
     # Remove punctuation
@@ -52,6 +57,10 @@ def normalize_text(value):
     value = re.sub(r"\s+", " ", value)
 
     return value.strip()
+
+
+def similarity(a, b):
+    return difflib.SequenceMatcher(None, a, b).ratio()
 
 
 # -----------------------------
@@ -131,8 +140,6 @@ def connect_to_abs():
     if not isinstance(libraries, list) or not libraries:
         fatal("No libraries found on Audiobookshelf server")
 
-    print(f"[DEBUG] Retrieved {len(libraries)} libraries from Audiobookshelf")
-
     return abs_url, headers, libraries
 
 
@@ -173,14 +180,12 @@ def fetch_library_items(abs_url, headers, library_id):
             headers=headers,
             timeout=60,
         )
+        response.raise_for_status()
     except requests.RequestException as e:
         fatal(f"Failed to fetch library items: {e}")
 
-    print("[DEBUG] HTTP status:", response.status_code)
-    print("[DEBUG] Raw response text (first 500 chars):")
-    print(response.text[:500])
-
     payload = response.json()
+
     items = (
         payload.get("results")
         or payload.get("libraryItems")
@@ -188,11 +193,10 @@ def fetch_library_items(abs_url, headers, library_id):
         or []
     )
 
-
-    print("[DEBUG] Parsed item count:", len(items))
+    if not isinstance(items, list):
+        fatal("Unexpected Audiobookshelf items response")
 
     return items
-
 
 
 # -----------------------------
@@ -216,8 +220,9 @@ def normalize_abs_items(items):
 
     return normalized
 
+
 # -----------------------------
-#  Index ABS items by ISBN
+# Matching helpers
 # -----------------------------
 
 def index_abs_items_by_isbn(abs_items):
@@ -230,9 +235,6 @@ def index_abs_items_by_isbn(abs_items):
 
     return index
 
-# -----------------------------
-#  Step 6: Match Goodreads books to ABS items
-# -----------------------------
 
 def match_by_isbn(goodreads_books, abs_index):
     matches = []
@@ -255,6 +257,7 @@ def match_by_isbn(goodreads_books, abs_index):
             unmatched.append(book)
 
     return matches, unmatched
+
 
 def index_abs_items_by_title_author(abs_items):
     index = {}
@@ -293,8 +296,6 @@ def match_by_title_author(goodreads_books, abs_index):
 
     return matches, unmatched
 
-def similarity(a, b):
-    return difflib.SequenceMatcher(None, a, b).ratio()
 
 def fuzzy_match_title_author(book, abs_items):
     gr_title = normalize_text(book.get("Title"))
@@ -312,17 +313,15 @@ def fuzzy_match_title_author(book, abs_items):
         if not abs_title or not abs_author:
             continue
 
-        title_score = similarity(gr_title, abs_title)
-        author_score = similarity(gr_author, abs_author)
+        if similarity(gr_title, abs_title) >= 0.9 and similarity(gr_author, abs_author) >= 0.85:
+            candidates.append(item)
 
-        # Strict thresholds
-        if title_score >= 0.9 and author_score >= 0.85:
-            candidates.append((title_score + author_score, item))
+    return candidates[0] if len(candidates) == 1 else None
 
-    if len(candidates) == 1:
-        return candidates[0][1]
 
-    return None
+# -----------------------------
+# Apply helpers
+# -----------------------------
 
 def preview_finish_updates(matches):
     print("\nPreview: items that would be marked as finished\n")
@@ -332,52 +331,67 @@ def preview_finish_updates(matches):
         print(f"     Goodreads: {gr.get('Title')} by {gr.get('Author')}")
 
 
+def mark_item_finished(abs_url, headers, library_item_id):
+    try:
+        response = requests.patch(
+            f"{abs_url}/api/me/progress/batch/update",
+            headers={**headers, "Content-Type": "application/json"},
+            json=[{
+                "libraryItemId": library_item_id,
+                "isFinished": True,
+            }],
+            timeout=30,
+        )
+        response.raise_for_status()
+        return True, None
+    except requests.RequestException as e:
+        return False, str(e)
+
+
+
 
 # -----------------------------
-# Main program flow
+# Argument parsing
+# -----------------------------
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Migrate Goodreads finished status to Audiobookshelf"
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply changes (mark matched audiobooks as finished)"
+    )
+    return parser.parse_args()
+
+
+# -----------------------------
+# Main
 # -----------------------------
 
 def main():
+    args = parse_args()
+
     print("ShelfMark v0.1")
-    print("Mode: DRY RUN (no changes will be made)")
+    print("Mode:", "APPLY" if args.apply else "DRY RUN")
     print()
 
-    # Step 1
     read_books = load_goodreads_csv()
-
-    # Step 2
     abs_url, headers, libraries = connect_to_abs()
-
-    # Step 3
     library = select_library(libraries)
 
-    # Step 4
     raw_items = fetch_library_items(abs_url, headers, library.get("id"))
     abs_items = normalize_abs_items(raw_items)
 
     print(f"\nFetched {len(abs_items)} items from library")
 
-    if abs_items:
-        sample = abs_items[0]
-        print("Sample library item:")
-        print(f"  Title: {sample['title']}")
-        print(f"  Author: {sample['author']}")
-        print()
-
-    print("Setup complete.")
-    print("Next step will match Goodreads books to this library.")
-    print("No changes have been made.")
-
-    # Step 5: Match by ISBN
-    # ISBN matching
     abs_isbn_index = index_abs_items_by_isbn(abs_items)
     isbn_matches, remaining = match_by_isbn(read_books, abs_isbn_index)
 
-    # Title + author matching
     abs_title_index = index_abs_items_by_title_author(abs_items)
     ta_matches, still_unmatched = match_by_title_author(remaining, abs_title_index)
 
-    # Fuzzy matching for remaining books
     fuzzy_matches = []
     still_unmatched_final = []
 
@@ -390,17 +404,46 @@ def main():
 
     all_matches = isbn_matches + ta_matches + fuzzy_matches
 
-    print(f"Matched by ISBN: {len(isbn_matches)}")
+    print(f"\nMatched by ISBN: {len(isbn_matches)}")
     print(f"Matched by title/author: {len(ta_matches)}")
     print(f"Matched by fuzzy logic: {len(fuzzy_matches)}")
     print(f"Total matched: {len(all_matches)}")
     print(f"Still unmatched: {len(still_unmatched_final)}")
 
-    # Step 11: Dry-run preview
     preview_finish_updates(all_matches)
 
-    print("\nDRY RUN complete.")
-    print("No changes have been applied.")
+    if not args.apply:
+        print("\nDRY RUN complete.")
+        print("Re-run with --apply to mark items as finished.")
+        return
+
+    confirm = input(
+        "\nThis will mark the above items as FINISHED in Audiobookshelf.\n"
+        "Type 'yes' to continue: "
+    ).strip().lower()
+
+    if confirm != "yes":
+        print("Aborted. No changes made.")
+        return
+
+    print("\nApplying updates...\n")
+
+    success = 0
+    failed = 0
+
+    for _, abs_item in all_matches:
+        ok, error = mark_item_finished(abs_url, headers, abs_item["id"])
+        if ok:
+            success += 1
+            print(f"[OK] {abs_item['title']}")
+        else:
+            failed += 1
+            print(f"[FAIL] {abs_item['title']}: {error}")
+
+    print("\nApply complete.")
+    print(f"  Success: {success}")
+    print(f"  Failed: {failed}")
+
 
 if __name__ == "__main__":
     main()
