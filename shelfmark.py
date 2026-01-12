@@ -324,6 +324,14 @@ def fuzzy_match_title_author(book, abs_items):
 
     return None
 
+def preview_finish_updates(matches):
+    print("\nPreview: items that would be marked as finished\n")
+
+    for idx, (gr, abs_item) in enumerate(matches, start=1):
+        print(f"[{idx}] {abs_item.get('title')} — {abs_item.get('author')}")
+        print(f"     Goodreads: {gr.get('Title')} by {gr.get('Author')}")
+
+
 
 # -----------------------------
 # Main program flow
@@ -388,7 +396,11 @@ def main():
     print(f"Total matched: {len(all_matches)}")
     print(f"Still unmatched: {len(still_unmatched_final)}")
 
+    # Step 11: Dry-run preview
+    preview_finish_updates(all_matches)
 
+    print("\nDRY RUN complete.")
+    print("No changes have been applied.")
 
 if __name__ == "__main__":
     main()
