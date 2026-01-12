@@ -6,6 +6,9 @@ Migrate Goodreads finished status to Audiobookshelf
 """
 
 import argparse
+import csv
+import os
+import sys
 
 def main():
     parser = argparse.ArgumentParser(
@@ -38,6 +41,38 @@ def main():
     )
 
     args = parser.parse_args()
+
+    csv_path = args.goodreads_csv
+
+    if not os.path.isfile(csv_path):
+        print(f"Error: Goodreads CSV file '{csv_path}' does not exist.")
+        sys.exit(1)
+
+    read_books = []
+
+    try:
+        with open(csv_path, newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                shelf = (row.get('Exclusive Shelf') or '').strip().lower()
+                if shelf == 'read':
+                    read_books.append(row)
+    except Exception as e:
+        print(f"Error reading CSV file: {e}")
+        sys.exit(1)
+
+
+    print(f"Loaded Goodreads CSV: {len(read_books)} books marked as Read")
+
+    if len(read_books) == 0:
+        print("WARNING: No books marked as 'Read' were found.")
+
+    if read_books:
+        sample = read_books[0]
+        print("Sample entry:")
+        print(f"  Title: {sample.get('Title')}")
+        print(f"  Author: {sample.get('Author')}")
+        print()
 
     dry_run = not args.apply
 
