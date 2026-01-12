@@ -3,7 +3,7 @@
 """
 ShelfMark
 Migrate Goodreads finished status to Audiobookshelf
-(Interactive, read-only stage)
+(Current stage: interactive, read-only)
 """
 
 import csv
@@ -13,16 +13,14 @@ import requests
 
 
 # -----------------------------
-# Helper functions
+# Utility helpers
 # -----------------------------
 
 def prompt(message):
-    """Simple input wrapper."""
     return input(message).strip()
 
 
 def fatal(message):
-    """Print error and exit."""
     print(f"ERROR: {message}")
     sys.exit(1)
 
@@ -67,11 +65,14 @@ def load_goodreads_csv():
 
 
 # -----------------------------
-# Step 2: Audiobookshelf URL & API key
+# Step 2: Connect to ABS
 # -----------------------------
 
 def connect_to_abs():
-    abs_url = prompt("Enter Audiobookshelf base URL (e.g. http://localhost:13378): ").rstrip("/")
+    abs_url = prompt(
+        "Enter Audiobookshelf base URL (e.g. http://localhost:13378): "
+    ).rstrip("/")
+
     api_key = prompt("Enter Audiobookshelf API key: ")
 
     if not abs_url.startswith("http"):
@@ -85,7 +86,6 @@ def connect_to_abs():
         "Accept": "application/json",
     }
 
-    # Test connection by fetching libraries
     try:
         response = requests.get(
             f"{abs_url}/api/libraries",
@@ -97,15 +97,14 @@ def connect_to_abs():
         fatal(f"Failed to connect to Audiobookshelf API: {e}")
 
     payload = response.json()
-
-    if not isinstance(payload, dict):
-        fatal("Unexpected response format from Audiobookshelf API")
-
-    libraries = payload.get("libraries")
+    libraries = payload.get("libraries", [])
 
     if not isinstance(libraries, list) or not libraries:
         fatal("No libraries found on Audiobookshelf server")
 
+    print(f"[DEBUG] Retrieved {len(libraries)} libraries from Audiobookshelf")
+
+    return abs_url, headers, libraries
 
 
 # -----------------------------
@@ -135,6 +134,61 @@ def select_library(libraries):
 
 
 # -----------------------------
+# Step 4: Fetch library items
+# -----------------------------
+
+def fetch_library_items(abs_url, headers, library_id):
+    try:
+        response = requests.get(
+            f"{abs_url}/api/libraries/{library_id}/items",
+            headers=headers,
+            timeout=60,
+        )
+    except requests.RequestException as e:
+        fatal(f"Failed to fetch library items: {e}")
+
+    print("[DEBUG] HTTP status:", response.status_code)
+    print("[DEBUG] Raw response text (first 500 chars):")
+    print(response.text[:500])
+
+    payload = response.json()
+    items = (
+        payload.get("results")
+        or payload.get("libraryItems")
+        or payload.get("items")
+        or []
+    )
+
+
+    print("[DEBUG] Parsed item count:", len(items))
+
+    return items
+
+
+
+# -----------------------------
+# Step 5: Normalize ABS items
+# -----------------------------
+
+def normalize_abs_items(items):
+    normalized = []
+
+    for item in items:
+        media = item.get("media") or {}
+        metadata = media.get("metadata") or {}
+
+        normalized.append({
+            "id": item.get("id"),
+            "title": metadata.get("title"),
+            "author": metadata.get("authorName"),
+            "isbn": metadata.get("isbn"),
+            "asin": metadata.get("asin"),
+        })
+
+    return normalized
+
+
+# -----------------------------
 # Main program flow
 # -----------------------------
 
@@ -148,10 +202,22 @@ def main():
 
     # Step 2
     abs_url, headers, libraries = connect_to_abs()
-    print(f"Connected to Audiobookshelf ({len(libraries)} libraries found)")
 
     # Step 3
     library = select_library(libraries)
+
+    # Step 4
+    raw_items = fetch_library_items(abs_url, headers, library.get("id"))
+    abs_items = normalize_abs_items(raw_items)
+
+    print(f"\nFetched {len(abs_items)} items from library")
+
+    if abs_items:
+        sample = abs_items[0]
+        print("Sample library item:")
+        print(f"  Title: {sample['title']}")
+        print(f"  Author: {sample['author']}")
+        print()
 
     print("Setup complete.")
     print("Next step will match Goodreads books to this library.")
