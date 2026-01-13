@@ -7,6 +7,6 @@
 # api_key: your_api_key_here
 # library_name: Audiobook
 
-abs_url:
+abs_url: http://localhost:13378
 api_key:
 library_name:

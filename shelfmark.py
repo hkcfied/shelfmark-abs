@@ -12,6 +12,7 @@ import requests
 import re
 import difflib
 import argparse
+import yaml
 
 
 # -----------------------------
@@ -61,6 +62,33 @@ def normalize_text(value):
 
 def similarity(a, b):
     return difflib.SequenceMatcher(None, a, b).ratio()
+
+# -----------------------------
+# Load Configuration
+# -----------------------------
+
+def load_config(path="config.yml"):
+    if not os.path.exists(path):
+        return {}
+    
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as e:
+        fatal(f"Failed to load config.yml file: {e}")
+
+    if not isinstance(data, dict):
+        fatal("Config file must contain key-value pairs")
+
+    #Noramlize value: empty strings to None
+    normalized = {}
+    for key in ("abs_url", "api_key", "library_name"):
+        value = data.get(key)
+        if isinstance(value, str):
+            value = value.strip()
+        normalized[key] = value if value else None
+    return normalized
+
 
 
 # -----------------------------
@@ -371,6 +399,11 @@ def parse_args():
 # -----------------------------
 
 def main():
+    config = load_config()
+
+    if config:
+        print("Loaded configuration from config.yml")
+
     args = parse_args()
 
     print("ShelfMark v0.1")
