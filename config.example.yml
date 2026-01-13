@@ -1,0 +1,14 @@
+# ShelfMark configuration file
+#
+# All fields are optional.
+# If a value is missing or empty, ShelfMark will ask interactively.
+#
+# abs_url: http://localhost:13378
+# api_key: your_api_key_here
+# library_name: Audiobook
+# csv_path: goodreads_export.csv
+
+abs_url:
+api_key:
+library_name:
+csv_path:

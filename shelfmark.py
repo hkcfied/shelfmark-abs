@@ -82,7 +82,7 @@ def load_config(path="config.yml"):
 
     #Noramlize value: empty strings to None
     normalized = {}
-    for key in ("abs_url", "api_key", "library_name"):
+    for key in ("abs_url", "api_key", "library_name", "csv_path"):
         value = data.get(key)
         if isinstance(value, str):
             value = value.strip()
@@ -95,11 +95,13 @@ def load_config(path="config.yml"):
 # Step 1: Goodreads CSV
 # -----------------------------
 
-def load_goodreads_csv():
-    path = prompt("Enter path to Goodreads CSV export: ")
+def load_goodreads_csv(config):
+    path = config.get("csv_path") or prompt("Enter path to Goodreads CSV export: ")
+
+    path = os.path.expanduser(path)
 
     if not os.path.isfile(path):
-        fatal(f"File not found: {path}")
+        fatal(f"CSV file not found or not readable: {path}")
 
     read_books = []
 
@@ -134,12 +136,12 @@ def load_goodreads_csv():
 # Step 2: Connect to ABS
 # -----------------------------
 
-def connect_to_abs():
-    abs_url = prompt(
+def connect_to_abs(config):
+    abs_url = config.get("abs_url") or prompt(
         "Enter Audiobookshelf base URL (e.g. http://localhost:13378): "
     ).rstrip("/")
 
-    api_key = prompt("Enter Audiobookshelf API key: ")
+    api_key = config.get("api_key") or prompt("Enter Audiobookshelf API key: ")
 
     if not abs_url.startswith("http"):
         fatal("Audiobookshelf URL must start with http:// or https://")
@@ -175,9 +177,21 @@ def connect_to_abs():
 # Step 3: Library selection
 # -----------------------------
 
-def select_library(libraries):
+def select_library(libraries, config):
     print("\nAvailable libraries:")
 
+    preffered = config.get("library_name")
+    if preffered:
+        for lib in libraries:
+            if lib.get("name", "").lower() == preffered.lower():
+                print(f"Selected library from config: {lib.get('name')}\n")
+                return lib
+
+    available = ", ".join(lib.get("name") for lib in libraries)
+    fatal(
+        f"Config error: library_name '{preffered}' not found. \n"
+        f"Available libraries: {available}\n"
+    )
     for idx, lib in enumerate(libraries, start=1):
         print(f"[{idx}] {lib.get('name')}")
 
@@ -410,9 +424,9 @@ def main():
     print("Mode:", "APPLY" if args.apply else "DRY RUN")
     print()
 
-    read_books = load_goodreads_csv()
-    abs_url, headers, libraries = connect_to_abs()
-    library = select_library(libraries)
+    read_books = load_goodreads_csv(config)
+    abs_url, headers, libraries = connect_to_abs(config)
+    library = select_library(libraries, config)
 
     raw_items = fetch_library_items(abs_url, headers, library.get("id"))
     abs_items = normalize_abs_items(raw_items)
