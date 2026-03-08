@@ -13,6 +13,7 @@ import re
 import difflib
 import argparse
 import yaml
+import io
 
 
 # -----------------------------
@@ -95,6 +96,26 @@ def load_config(path="config.yml"):
 # Step 1: Goodreads CSV
 # -----------------------------
 
+def load_goodreads_csv_from_string(csv_text):
+    """Parse Goodreads CSV from string content (used by API)."""
+    read_books = []
+    
+    try:
+        reader = csv.DictReader(io.StringIO(csv_text))
+
+        if not reader.fieldnames or "Exclusive Shelf" not in reader.fieldnames:
+            raise ValueError("CSV does not appear to be a valid Goodreads export")
+
+        for row in reader:
+            shelf = (row.get("Exclusive Shelf") or "").strip().lower()
+            if shelf == "read":
+                read_books.append(row)
+                
+    except Exception as e:
+        raise ValueError(f"Failed to parse CSV: {e}")
+        
+    return read_books
+
 def load_goodreads_csv(config):
     path = config.get("csv_path") or prompt("Enter path to Goodreads CSV export: ")
 
@@ -109,7 +130,7 @@ def load_goodreads_csv(config):
         with open(path, newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
 
-            if "Exclusive Shelf" not in reader.fieldnames:
+            if not reader.fieldnames or "Exclusive Shelf" not in reader.fieldnames:
                 fatal("CSV does not appear to be a valid Goodreads export")
 
             for row in reader:
@@ -136,18 +157,16 @@ def load_goodreads_csv(config):
 # Step 2: Connect to ABS
 # -----------------------------
 
-def connect_to_abs(config):
-    abs_url = config.get("abs_url") or prompt(
-        "Enter Audiobookshelf base URL (e.g. http://localhost:13378): "
-    ).rstrip("/")
-
-    api_key = config.get("api_key") or prompt("Enter Audiobookshelf API key: ")
-
-    if not abs_url.startswith("http"):
-        fatal("Audiobookshelf URL must start with http:// or https://")
+def connect_to_abs_params(abs_url, api_key):
+    """Connect to ABS using provided parameters (used by API)."""
+    abs_url = abs_url.rstrip("/")
+    from urllib.parse import urlparse
+    parsed = urlparse(abs_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Audiobookshelf URL must start with http:// or https://")
 
     if not api_key:
-        fatal("API key cannot be empty")
+        raise ValueError("API key cannot be empty")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -162,15 +181,27 @@ def connect_to_abs(config):
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        fatal(f"Failed to connect to Audiobookshelf API: {e}")
+        raise ValueError(f"Failed to connect to Audiobookshelf API: {e}")
 
     payload = response.json()
     libraries = payload.get("libraries", [])
 
     if not isinstance(libraries, list) or not libraries:
-        fatal("No libraries found on Audiobookshelf server")
+        raise ValueError("No libraries found on Audiobookshelf server")
 
     return abs_url, headers, libraries
+
+def connect_to_abs(config):
+    abs_url = config.get("abs_url") or prompt(
+        "Enter Audiobookshelf base URL (e.g. http://localhost:13378): "
+    ).rstrip("/")
+
+    api_key = config.get("api_key") or prompt("Enter Audiobookshelf API key: ")
+
+    try:
+        return connect_to_abs_params(abs_url, api_key)
+    except ValueError as e:
+        fatal(str(e))
 
 
 # -----------------------------
@@ -224,7 +255,8 @@ def fetch_library_items(abs_url, headers, library_id):
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        fatal(f"Failed to fetch library items: {e}")
+        # Check if caller expects an exception rather than a hard exit
+        raise ValueError(f"Failed to fetch library items: {e}")
 
     payload = response.json()
 
@@ -236,7 +268,7 @@ def fetch_library_items(abs_url, headers, library_id):
     )
 
     if not isinstance(items, list):
-        fatal("Unexpected Audiobookshelf items response")
+        raise ValueError("Unexpected Audiobookshelf items response")
 
     return items
 
@@ -428,7 +460,11 @@ def main():
     abs_url, headers, libraries = connect_to_abs(config)
     library = select_library(libraries, config)
 
-    raw_items = fetch_library_items(abs_url, headers, library.get("id"))
+    try:
+        raw_items = fetch_library_items(abs_url, headers, library.get("id"))
+    except ValueError as e:
+        fatal(str(e))
+        
     abs_items = normalize_abs_items(raw_items)
 
     print(f"\nFetched {len(abs_items)} items from library")
