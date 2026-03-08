@@ -12,6 +12,8 @@ import requests
 import re
 import difflib
 import argparse
+import yaml
+import io
 
 
 # -----------------------------
@@ -62,16 +64,65 @@ def normalize_text(value):
 def similarity(a, b):
     return difflib.SequenceMatcher(None, a, b).ratio()
 
+# -----------------------------
+# Load Configuration
+# -----------------------------
+
+def load_config(path="config.yml"):
+    if not os.path.exists(path):
+        return {}
+    
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as e:
+        fatal(f"Failed to load config.yml file: {e}")
+
+    if not isinstance(data, dict):
+        fatal("Config file must contain key-value pairs")
+
+    #Noramlize value: empty strings to None
+    normalized = {}
+    for key in ("abs_url", "api_key", "library_name", "csv_path"):
+        value = data.get(key)
+        if isinstance(value, str):
+            value = value.strip()
+        normalized[key] = value if value else None
+    return normalized
+
+
 
 # -----------------------------
 # Step 1: Goodreads CSV
 # -----------------------------
 
-def load_goodreads_csv():
-    path = prompt("Enter path to Goodreads CSV export: ")
+def load_goodreads_csv_from_string(csv_text):
+    """Parse Goodreads CSV from string content (used by API)."""
+    read_books = []
+    
+    try:
+        reader = csv.DictReader(io.StringIO(csv_text))
+
+        if not reader.fieldnames or "Exclusive Shelf" not in reader.fieldnames:
+            raise ValueError("CSV does not appear to be a valid Goodreads export")
+
+        for row in reader:
+            shelf = (row.get("Exclusive Shelf") or "").strip().lower()
+            if shelf == "read":
+                read_books.append(row)
+                
+    except Exception as e:
+        raise ValueError(f"Failed to parse CSV: {e}")
+        
+    return read_books
+
+def load_goodreads_csv(config):
+    path = config.get("csv_path") or prompt("Enter path to Goodreads CSV export: ")
+
+    path = os.path.expanduser(path)
 
     if not os.path.isfile(path):
-        fatal(f"File not found: {path}")
+        fatal(f"CSV file not found or not readable: {path}")
 
     read_books = []
 
@@ -79,7 +130,7 @@ def load_goodreads_csv():
         with open(path, newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
 
-            if "Exclusive Shelf" not in reader.fieldnames:
+            if not reader.fieldnames or "Exclusive Shelf" not in reader.fieldnames:
                 fatal("CSV does not appear to be a valid Goodreads export")
 
             for row in reader:
@@ -106,18 +157,16 @@ def load_goodreads_csv():
 # Step 2: Connect to ABS
 # -----------------------------
 
-def connect_to_abs():
-    abs_url = prompt(
-        "Enter Audiobookshelf base URL (e.g. http://localhost:13378): "
-    ).rstrip("/")
-
-    api_key = prompt("Enter Audiobookshelf API key: ")
-
-    if not abs_url.startswith("http"):
-        fatal("Audiobookshelf URL must start with http:// or https://")
+def connect_to_abs_params(abs_url, api_key):
+    """Connect to ABS using provided parameters (used by API)."""
+    abs_url = abs_url.rstrip("/")
+    from urllib.parse import urlparse
+    parsed = urlparse(abs_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Audiobookshelf URL must start with http:// or https://")
 
     if not api_key:
-        fatal("API key cannot be empty")
+        raise ValueError("API key cannot be empty")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -132,24 +181,48 @@ def connect_to_abs():
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        fatal(f"Failed to connect to Audiobookshelf API: {e}")
+        raise ValueError(f"Failed to connect to Audiobookshelf API: {e}")
 
     payload = response.json()
     libraries = payload.get("libraries", [])
 
     if not isinstance(libraries, list) or not libraries:
-        fatal("No libraries found on Audiobookshelf server")
+        raise ValueError("No libraries found on Audiobookshelf server")
 
     return abs_url, headers, libraries
+
+def connect_to_abs(config):
+    abs_url = config.get("abs_url") or prompt(
+        "Enter Audiobookshelf base URL (e.g. http://localhost:13378): "
+    ).rstrip("/")
+
+    api_key = config.get("api_key") or prompt("Enter Audiobookshelf API key: ")
+
+    try:
+        return connect_to_abs_params(abs_url, api_key)
+    except ValueError as e:
+        fatal(str(e))
 
 
 # -----------------------------
 # Step 3: Library selection
 # -----------------------------
 
-def select_library(libraries):
+def select_library(libraries, config):
     print("\nAvailable libraries:")
 
+    preffered = config.get("library_name")
+    if preffered:
+        for lib in libraries:
+            if lib.get("name", "").lower() == preffered.lower():
+                print(f"Selected library from config: {lib.get('name')}\n")
+                return lib
+
+    available = ", ".join(lib.get("name") for lib in libraries)
+    fatal(
+        f"Config error: library_name '{preffered}' not found. \n"
+        f"Available libraries: {available}\n"
+    )
     for idx, lib in enumerate(libraries, start=1):
         print(f"[{idx}] {lib.get('name')}")
 
@@ -182,7 +255,8 @@ def fetch_library_items(abs_url, headers, library_id):
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        fatal(f"Failed to fetch library items: {e}")
+        # Check if caller expects an exception rather than a hard exit
+        raise ValueError(f"Failed to fetch library items: {e}")
 
     payload = response.json()
 
@@ -194,7 +268,7 @@ def fetch_library_items(abs_url, headers, library_id):
     )
 
     if not isinstance(items, list):
-        fatal("Unexpected Audiobookshelf items response")
+        raise ValueError("Unexpected Audiobookshelf items response")
 
     return items
 
@@ -371,17 +445,26 @@ def parse_args():
 # -----------------------------
 
 def main():
+    config = load_config()
+
+    if config:
+        print("Loaded configuration from config.yml")
+
     args = parse_args()
 
     print("ShelfMark v0.1")
     print("Mode:", "APPLY" if args.apply else "DRY RUN")
     print()
 
-    read_books = load_goodreads_csv()
-    abs_url, headers, libraries = connect_to_abs()
-    library = select_library(libraries)
+    read_books = load_goodreads_csv(config)
+    abs_url, headers, libraries = connect_to_abs(config)
+    library = select_library(libraries, config)
 
-    raw_items = fetch_library_items(abs_url, headers, library.get("id"))
+    try:
+        raw_items = fetch_library_items(abs_url, headers, library.get("id"))
+    except ValueError as e:
+        fatal(str(e))
+        
     abs_items = normalize_abs_items(raw_items)
 
     print(f"\nFetched {len(abs_items)} items from library")

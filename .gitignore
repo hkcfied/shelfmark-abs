@@ -14,3 +14,16 @@ venv/
 
 # macOS
 .DS_Store
+
+# Config file
+config.yml
+test.csv
+
+# Agent/AI tools
+.claude/
+.gemini/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/

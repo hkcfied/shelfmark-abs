@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShelfMark</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/feather-icons@4.29.2/dist/feather.min.js"
+            integrity="sha384-qEqAs1VsN9WH2myXDbiP2wGGIttL9bMRZBKCl54ZnzpDlVqbYANP9vMaoT/wvQcf"
+            crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <!-- Decorative background -->
+    <div class="bg-decoration">
+        <div class="bg-grain"></div>
+        <div class="bg-gradient"></div>
+    </div>
+
+    <!-- Main App -->
+    <main class="app-container">
+
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-mark">
+                <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="4" y="2" width="8" height="32" rx="2" fill="var(--accent)"/>
+                    <rect x="14" y="6" width="8" height="28" rx="2" fill="var(--accent)" opacity="0.6"/>
+                    <rect x="24" y="4" width="8" height="30" rx="2" fill="var(--accent)" opacity="0.3"/>
+                </svg>
+            </div>
+            <h1 class="app-title">ShelfMark</h1>
+            <p class="app-subtitle">Migrate your Goodreads reading history to Audiobookshelf</p>
+        </header>
+
+        <!-- Views -->
+        <div id="view-container" class="view-container">
+
+            <!-- VIEW 1: Connect -->
+            <section id="view-connect" class="view active-view">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Connection Details</h2>
+                        <p class="card-desc">Enter your Audiobookshelf credentials and upload your Goodreads export.</p>
+                    </div>
+
+                    <form id="connect-form" class="form">
+
+                        <div class="form-group">
+                            <label for="abs-url">Server URL</label>
+                            <div class="input-wrap" id="wrap-abs-url">
+                                <span class="input-icon"><i data-feather="globe"></i></span>
+                                <input type="url" id="abs-url" placeholder="http://localhost:13378" required>
+                            </div>
+                            <span class="field-error" id="error-abs-url"></span>
+                            <a href="#" class="hint tooltip" data-tip="Usually http://localhost:13378 if running locally. Ask your server admin if hosted externally.">Where do I find this?</a>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="abs-api-key">API Key</label>
+                            <div class="input-wrap has-suffix" id="wrap-abs-api-key">
+                                <span class="input-icon"><i data-feather="lock"></i></span>
+                                <input type="password" id="abs-api-key" placeholder="Paste your API key" required>
+                                <button type="button" class="input-suffix toggle-password" aria-label="Toggle password visibility">
+                                    <i data-feather="eye"></i>
+                                </button>
+                            </div>
+                            <span class="field-error" id="error-abs-api-key"></span>
+                            <a href="#" class="hint tooltip" data-tip="In Audiobookshelf, go to Settings > Users > Select User > API Keys.">How to get an API key?</a>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="csv-file">Goodreads CSV Export</label>
+                            <div class="drop-zone" id="file-drop-zone">
+                                <div class="drop-zone-content">
+                                    <div class="drop-zone-icon">
+                                        <i data-feather="upload"></i>
+                                    </div>
+                                    <p class="drop-zone-text">Drop your CSV file here, or <span class="drop-zone-browse">browse</span></p>
+                                    <p id="file-name-display" class="drop-zone-file"></p>
+                                </div>
+                                <input type="file" id="csv-file" accept=".csv" class="sr-only">
+                            </div>
+                            <span class="field-error" id="error-csv-file"></span>
+                            <a href="https://www.goodreads.com/review/import" target="_blank" rel="noopener noreferrer" class="hint">Export your Goodreads library &rarr;</a>
+                        </div>
+
+                        <div class="form-footer">
+                            <div class="privacy-note">
+                                <i data-feather="shield"></i>
+                                <span>Your data stays on your machine. Nothing is sent externally.</span>
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="btn-connect">
+                                <span>Connect & Analyze</span>
+                                <i data-feather="arrow-right"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- VIEW 2: Library Selection -->
+            <section id="view-library" class="view hidden-view">
+                <div class="card">
+                    <button class="btn-back" id="back-to-connect">
+                        <i data-feather="arrow-left"></i>
+                        <span>Back</span>
+                    </button>
+                    <div class="card-header">
+                        <h2>Choose a Library</h2>
+                        <p class="card-desc">Select which Audiobookshelf library to sync your reading progress to.</p>
+                    </div>
+                    <div id="libraries-grid" class="lib-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 3: Preview -->
+            <section id="view-preview" class="view hidden-view">
+                <div class="card card-wide">
+                    <button class="btn-back" id="back-to-library">
+                        <i data-feather="arrow-left"></i>
+                        <span>Back</span>
+                    </button>
+                    <div class="card-header">
+                        <h2>Migration Preview</h2>
+                        <p class="card-desc">Review matched books before applying changes.</p>
+                    </div>
+
+                    <!-- Stats / Filters -->
+                    <div class="stats-row" id="stats-grid">
+                        <button type="button" class="stat-pill stat-all active" id="filter-all">
+                            <span class="stat-text">All</span>
+                        </button>
+                        <button type="button" class="stat-pill stat-exact" id="filter-exact">
+                            <i data-feather="check-circle"></i>
+                            <span class="stat-num" id="stat-exact">--</span>
+                            <span class="stat-text">Exact</span>
+                        </button>
+                        <button type="button" class="stat-pill stat-fuzzy" id="filter-fuzzy">
+                            <i data-feather="zap"></i>
+                            <span class="stat-num" id="stat-fuzzy">--</span>
+                            <span class="stat-text">Fuzzy</span>
+                        </button>
+                        <button type="button" class="stat-pill stat-unmatched" id="filter-unmatched">
+                            <i data-feather="x-circle"></i>
+                            <span class="stat-num" id="stat-unmatched">--</span>
+                            <span class="stat-text">Unmatched</span>
+                        </button>
+                    </div>
+
+                    <!-- Table -->
+                    <div class="table-wrap">
+                        <table class="match-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-check" scope="col"><span class="sr-only">Select</span></th>
+                                    <th>Goodreads</th>
+                                    <th>Audiobookshelf</th>
+                                    <th>Confidence</th>
+                                </tr>
+                            </thead>
+                            <tbody id="matches-tbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="preview-footer">
+                        <p class="preview-hint">
+                            <i data-feather="info"></i>
+                            Review fuzzy matches carefully. Uncheck items you don't want to sync.
+                        </p>
+                        <button class="btn btn-primary" id="btn-apply-migration">
+                            <span>Mark as Read in Audiobookshelf</span>
+                            <i data-feather="check"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 4: Summary -->
+            <section id="view-summary" class="view hidden-view">
+                <div class="card card-center">
+                    <div class="summary-icon">
+                        <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="36" cy="36" r="36" fill="var(--success-bg)"/>
+                            <path d="M22 36L32 46L50 28" stroke="var(--success)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h2>Migration Complete</h2>
+                    <p class="card-desc" id="summary-message">--</p>
+
+                    <div class="summary-badges">
+                        <div class="summary-badge summary-error" id="summary-error-badge" style="display: none;">
+                            <span class="summary-count" id="summary-failed-count">--</span>
+                            <span>failed</span>
+                        </div>
+                    </div>
+
+                    <div class="summary-actions">
+                        <button class="btn btn-secondary" id="btn-restart">
+                            <i data-feather="refresh-cw"></i>
+                            <span>Start Over</span>
+                        </button>
+                        <a href="https://github.com/hkcfied/shelfmark-abs" target="_blank" rel="noopener noreferrer" class="btn btn-star">
+                            <i data-feather="star"></i>
+                            <span>Star on GitHub</span>
+                        </a>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="overlay hidden" aria-hidden="true">
+        <div class="overlay-content">
+            <div class="loader" role="status" aria-label="Loading"></div>
+            <p id="loading-text">Processing...</p>
+        </div>
+    </div>
+
+    <!-- Snackbar -->
+    <div id="snackbar">
+        <span id="snackbar-text"></span>
+        <button class="snackbar-close" aria-label="Close">
+            <i data-feather="x"></i>
+        </button>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
